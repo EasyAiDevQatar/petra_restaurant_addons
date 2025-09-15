@@ -7,12 +7,16 @@ from frappe.utils import flt, getdate
 
 
 def execute(filters=None):
-	columns = get_columns()
-	data = get_data(filters)
+	columns, cost_centers = get_columns(filters)
+	data = get_data(filters, cost_centers)
 	return columns, data
 
 
-def get_columns():
+def get_columns(filters=None):
+	# Get all unique cost centers from the data
+	cost_centers = get_cost_centers(filters)
+	
+	# Base columns - basic information
 	columns = [
 		{
 			"fieldname": "pos_opening_shift",
@@ -35,6 +39,32 @@ def get_columns():
 			"options": "POS Closing Shift",
 			"width": 180
 		},
+		{
+			"fieldname": "posting_date",
+			"label": _("Posting Date"),
+			"fieldtype": "Date",
+			"width": 100
+		},
+		{
+			"fieldname": "cashier",
+			"label": _("Cashier"),
+			"fieldtype": "Link",
+			"options": "User",
+			"width": 120
+		}
+	]
+	
+	# Add dynamic cost center columns in the middle
+	for cost_center in cost_centers:
+		columns.append({
+			"fieldname": f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}",
+			"label": cost_center,
+			"fieldtype": "Currency",
+			"width": 120
+		})
+	
+	# Add totals columns at the end
+	totals_columns = [
 		{
 			"fieldname": "total_shifts",
 			"label": _("Total Shifts"),
@@ -89,25 +119,35 @@ def get_columns():
 			"label": _("Average per Shift"),
 			"fieldtype": "Currency",
 			"width": 120
-		},
-		{
-			"fieldname": "posting_date",
-			"label": _("Posting Date"),
-			"fieldtype": "Date",
-			"width": 100
-		},
-		{
-			"fieldname": "cashier",
-			"label": _("Cashier"),
-			"fieldtype": "Link",
-			"options": "User",
-			"width": 120
 		}
 	]
-	return columns
+	
+	# Combine all columns
+	columns.extend(totals_columns)
+	
+	return columns, cost_centers
 
 
-def get_data(filters):
+def get_cost_centers(filters):
+	"""Get all unique cost centers from the data"""
+	conditions, params = get_conditions(filters)
+	
+	cost_centers_query = """
+		SELECT DISTINCT pp.cost_center
+		FROM `tabPOS Closing Shift` cs
+		INNER JOIN `tabPOS Opening Shift` os ON cs.pos_opening_shift = os.name
+		LEFT JOIN `tabPOS Profile` pp ON cs.pos_profile = pp.name
+		WHERE cs.docstatus = 1
+		AND pp.cost_center IS NOT NULL
+		AND {conditions}
+		ORDER BY pp.cost_center
+	""".format(conditions=conditions)
+	
+	result = frappe.db.sql(cost_centers_query, params, as_dict=True)
+	return [row.cost_center for row in result if row.cost_center]
+
+
+def get_data(filters, cost_centers):
 	# Build the query conditions and parameters
 	conditions, params = get_conditions(filters)
 	
@@ -126,9 +166,11 @@ def get_data(filters):
 			os.period_start_date,
 			os.period_end_date,
 			os.user as cashier,
-			cs.company
+			cs.company,
+			pp.cost_center
 		FROM `tabPOS Closing Shift` cs
 		INNER JOIN `tabPOS Opening Shift` os ON cs.pos_opening_shift = os.name
+		LEFT JOIN `tabPOS Profile` pp ON cs.pos_profile = pp.name
 		WHERE cs.docstatus = 1
 		AND {conditions}
 		ORDER BY cs.pos_profile, cs.posting_date
@@ -163,6 +205,16 @@ def get_data(filters):
 			payment_data = get_payment_breakdown(shift.pos_opening_shift)
 			shift_data[opening_shift]['total_cash_sales'] = payment_data.get('cash', 0)
 			shift_data[opening_shift]['total_card_sales'] = payment_data.get('card', 0)
+			
+			# Initialize cost center columns
+			for cost_center in cost_centers:
+				field_name = f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}"
+				shift_data[opening_shift][field_name] = 0
+			
+			# Set the value for this shift's cost center
+			if shift.cost_center:
+				field_name = f"cost_center_{shift.cost_center.replace(' ', '_').replace('-', '_')}"
+				shift_data[opening_shift][field_name] = flt(shift.grand_total)
 	
 	# Convert to list
 	data = list(shift_data.values())
@@ -185,6 +237,12 @@ def get_data(filters):
 			'posting_date': '',
 			'cashier': ''
 		}
+		
+		# Add cost center totals
+		for cost_center in cost_centers:
+			field_name = f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}"
+			grand_totals[field_name] = sum(row.get(field_name, 0) for row in data)
+		
 		# Calculate overall average per shift
 		if grand_totals['total_shifts'] > 0:
 			grand_totals['average_per_shift'] = flt(grand_totals['total_grand_total']) / grand_totals['total_shifts']
@@ -260,6 +318,7 @@ def get_conditions(filters):
 	if filters.get("company"):
 		conditions.append("cs.company = %(company)s")
 		params["company"] = filters.get("company")
+	
 	
 	# Default condition if no filters are applied
 	if not conditions:
