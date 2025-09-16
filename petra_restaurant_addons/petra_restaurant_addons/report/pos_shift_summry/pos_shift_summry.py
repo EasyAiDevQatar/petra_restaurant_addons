@@ -102,18 +102,7 @@ def get_columns(filters=None):
 			"precision": 2,
 			"width": 120
 		},
-		{
-			"fieldname": "return_sales_total",
-			"label": _("Return Sales Total"),
-			"fieldtype": "Currency",
-			"width": 120
-		},
-		{
-			"fieldname": "return_sales_count",
-			"label": _("Return Sales Count"),
-			"fieldtype": "Int",
-			"width": 120
-		},
+		
 		{
 			"fieldname": "average_per_shift",
 			"label": _("Average per Shift"),
@@ -160,8 +149,7 @@ def get_data(filters, cost_centers):
 			cs.grand_total,
 			cs.net_total,
 			cs.total_quantity,
-			cs.return_sales_total,
-			cs.return_sales_count,
+			
 			cs.posting_date,
 			os.period_start_date,
 			os.period_end_date,
@@ -194,7 +182,6 @@ def get_data(filters, cost_centers):
 				'total_grand_total': flt(shift.grand_total),
 				'total_net_total': flt(shift.net_total),
 				'total_quantity': flt(shift.total_quantity),
-				'return_sales_total': flt(shift.return_sales_total),
 				'return_sales_count': flt(shift.return_sales_count),
 				'average_per_shift': flt(shift.grand_total),  # Same as grand total for individual shift
 				'posting_date': shift.posting_date,
@@ -231,7 +218,6 @@ def get_data(filters, cost_centers):
 			'total_grand_total': sum(row['total_grand_total'] for row in data),
 			'total_net_total': sum(row['total_net_total'] for row in data),
 			'total_quantity': sum(row['total_quantity'] for row in data),
-			'return_sales_total': sum(row['return_sales_total'] for row in data),
 			'return_sales_count': sum(row['return_sales_count'] for row in data),
 			'average_per_shift': 0,  # Will be calculated separately
 			'posting_date': '',
