@@ -6,9 +6,10 @@ from frappe import _
 from frappe.utils import flt, getdate
 
 
-def format_currency(amount):
-	"""Format currency for display"""
-	return f"LYD {flt(amount):.2f}"
+def format_currency(amount, company=None):
+	"""Format currency for display using system default currency"""
+	currency = frappe.get_cached_value("Company", company or frappe.defaults.get_user_default("Company"), "default_currency")
+	return f"{currency} {flt(amount):.2f}"
 
 
 def execute(filters=None):
@@ -21,98 +22,111 @@ def get_columns(filters=None):
 	# Get all unique cost centers from the data
 	cost_centers = get_cost_centers(filters)
 	
-	# Base columns - basic information
+	# Get default currency from company
+	company = filters.get("company") or frappe.defaults.get_user_default("Company")
+	default_currency = frappe.get_cached_value("Company", company, "default_currency")
+	# Base columns - basic information with enhanced styling
 	columns = [
 		{
 			"fieldname": "pos_opening_shift",
 			"label": _("POS Opening Shift"),
 			"fieldtype": "Link",
 			"options": "POS Opening Shift",
-			"width": 300
+			"width": 200,
+			"align": "left"
 		},
 		{
 			"fieldname": "pos_profile",
 			"label": _("POS Profile"),
 			"fieldtype": "Link",
 			"options": "POS Profile",
-			"width": 150
-		},
-		{
-			"fieldname": "pos_closing_shift",
-			"label": _("POS Closing Shift"),
-			"fieldtype": "Link",
-			"options": "POS Closing Shift",
-			"width": 250
+			"width": 120,
+			"align": "center"
 		},
 		{
 			"fieldname": "posting_date",
-			"label": _("Posting Date"),
+			"label": _("Date"),
 			"fieldtype": "Date",
-			"width": 200
+			"width": 100,
+			"align": "center"
 		},
 		{
 			"fieldname": "cashier",
 			"label": _("Cashier"),
 			"fieldtype": "Link",
 			"options": "User",
-			"width": 120
+			"width": 120,
+			"align": "left"
+		},
+		{
+			"fieldname": "total_shifts",
+			"label": _("Shifts"),
+			"fieldtype": "Int",
+			"width": 80,
+			"align": "center"
 		}
 	]
 	
-	# Add dynamic cost center columns in the middle
+	# Add dynamic cost center columns with enhanced styling
 	for cost_center in cost_centers:
 		columns.append({
 			"fieldname": f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}",
 			"label": cost_center,
 			"fieldtype": "Currency",
-			"width": 120
+			"width": 100,
+			"align": "right",
+			"options": default_currency
 		})
 	
-	# Add totals columns at the end
+	# Add totals columns at the end with enhanced styling
 	totals_columns = [
 		{
-			"fieldname": "total_shifts",
-			"label": _("Total Shifts"),
-			"fieldtype": "Int",
-			"width": 100
-		},
-		{
 			"fieldname": "total_cash_sales",
-			"label": _("Total Cash Sales"),
+			"label": _("Cash Sales"),
 			"fieldtype": "Currency",
-			"width": 120
+			"width": 100,
+			"align": "right",
+			"options": default_currency
 		},
 		{
 			"fieldname": "total_card_sales",
-			"label": _("Total Card Sales"),
+			"label": _("Card Sales"),
 			"fieldtype": "Currency",
-			"width": 120
+			"width": 100,
+			"align": "right",
+			"options": default_currency
 		},
 		{
 			"fieldname": "total_grand_total",
 			"label": _("Grand Total"),
 			"fieldtype": "Currency",
-			"width": 120
+			"width": 120,
+			"align": "right",
+			"options": default_currency
 		},
 		{
 			"fieldname": "total_net_total",
 			"label": _("Net Total"),
 			"fieldtype": "Currency",
-			"width": 120
+			"width": 120,
+			"align": "right",
+			"options": default_currency
 		},
 		{
 			"fieldname": "total_quantity",
-			"label": _("Total Quantity"),
+			"label": _("Quantity"),
 			"fieldtype": "Float",
 			"precision": 2,
-			"width": 120
+			"width": 80,
+			"align": "right"
 		},
-		
 		{
 			"fieldname": "average_per_shift",
-			"label": _("Average per Shift"),
+			"label": _("Avg/Shift"),
 			"fieldtype": "Currency",
-			"width": 120
+			"width": 100,
+			"align": "right",
+			"options": default_currency
 		}
 	]
 	
@@ -154,7 +168,6 @@ def get_data(filters, cost_centers):
 			cs.grand_total,
 			cs.net_total,
 			cs.total_quantity,
-			
 			cs.posting_date,
 			os.period_start_date,
 			os.period_end_date,
@@ -171,6 +184,7 @@ def get_data(filters, cost_centers):
 	
 	closing_shifts = frappe.db.sql(base_query, params, as_dict=True)
 	
+	
 	# Group data by POS Opening Shift
 	shift_data = {}
 	for shift in closing_shifts:
@@ -181,26 +195,21 @@ def get_data(filters, cost_centers):
 				'pos_opening_shift': opening_shift,
 				'pos_profile': shift.pos_profile,
 				'pos_closing_shift': shift.pos_closing_shift,
-				'total_shifts': 1,  # Each opening shift represents one shift
+				'total_shifts': 1,
 				'total_cash_sales': 0,
 				'total_card_sales': 0,
 				'total_grand_total': flt(shift.grand_total),
 				'total_net_total': flt(shift.net_total),
 				'total_quantity': flt(shift.total_quantity),
-				'return_sales_count': flt(shift.return_sales_count),
-				'average_per_shift': flt(shift.grand_total),  # Same as grand total for individual shift
+				'average_per_shift': flt(shift.grand_total),
 				'posting_date': shift.posting_date,
-				'cashier': shift.cashier,
-				'sales_invoices': []  # Add sales invoices list
+				'cashier': shift.cashier
 			}
 			
 			# Get payment breakdown for this shift
 			payment_data = get_payment_breakdown(shift.pos_opening_shift)
 			shift_data[opening_shift]['total_cash_sales'] = payment_data.get('cash', 0)
 			shift_data[opening_shift]['total_card_sales'] = payment_data.get('card', 0)
-			
-			# Get sales invoices for this shift
-			shift_data[opening_shift]['sales_invoices'] = get_sales_invoices_for_shift(shift.pos_opening_shift)
 			
 			# Initialize cost center columns
 			for cost_center in cost_centers:
@@ -212,84 +221,10 @@ def get_data(filters, cost_centers):
 				field_name = f"cost_center_{shift.cost_center.replace(' ', '_').replace('-', '_')}"
 				shift_data[opening_shift][field_name] = flt(shift.grand_total)
 	
-	# Convert to list and create expandable rows
+	# Convert to list
 	data = []
 	for shift_key, shift_info in shift_data.items():
-		# Add main shift row
-		shift_row = shift_info.copy()
-		shift_row['_is_group'] = 1  # Mark as group row
-		shift_row['_indent'] = 0
-		data.append(shift_row)
-		
-		# Add invoice rows as child rows
-		for invoice in shift_info['sales_invoices']:
-			invoice_row = {
-				'pos_opening_shift': f"  └─ {invoice['invoice_name']}",
-				'pos_profile': '',
-				'pos_closing_shift': '',
-				'posting_date': invoice['posting_date'],
-				'cashier': f"{invoice['customer'] or 'Walk-in Customer'} | {invoice['posting_time'] or ''}",
-				'total_grand_total': flt(invoice['grand_total']),
-				'total_net_total': flt(invoice['net_total']),
-				'total_quantity': flt(invoice['total_qty']),
-				'_is_group': 0,  # Mark as child row
-				'_indent': 1,
-				'invoice_items': invoice['items'],
-				'invoice_payments': invoice['payments']
-			}
-			
-			# Initialize cost center columns for invoice row
-			for cost_center in cost_centers:
-				field_name = f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}"
-				invoice_row[field_name] = 0
-			
-			# Set other columns to empty or zero
-			invoice_row.update({
-				'total_shifts': 0,
-				'total_cash_sales': 0,
-				'total_card_sales': 0,
-				'return_sales_count': 0,
-				'average_per_shift': 0
-			})
-			
-			data.append(invoice_row)
-			
-			# Add item rows for this invoice
-			for item in invoice['items']:
-				item_row = {
-					'pos_opening_shift': f"    • {item['item_code']} - {item['item_name']}",
-					'pos_profile': '',
-					'pos_closing_shift': '',
-					'posting_date': '',
-					'cashier': f"Qty: {item['qty']} | Rate: {format_currency(item['rate'])} | UOM: {item['uom'] or 'Nos'}",
-					'total_grand_total': flt(item['amount']),
-					'total_net_total': flt(item['amount']),
-					'total_quantity': flt(item['qty']),
-					'_is_group': 0,  # Mark as child row
-					'_indent': 2,
-					'item_code': item['item_code'],
-					'item_name': item['item_name'],
-					'item_qty': item['qty'],
-					'item_rate': item['rate'],
-					'item_amount': item['amount'],
-					'item_uom': item['uom']
-				}
-				
-				# Initialize cost center columns for item row
-				for cost_center in cost_centers:
-					field_name = f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}"
-					item_row[field_name] = 0
-				
-				# Set other columns to empty or zero
-				item_row.update({
-					'total_shifts': 0,
-					'total_cash_sales': 0,
-					'total_card_sales': 0,
-					'return_sales_count': 0,
-					'average_per_shift': 0
-				})
-				
-				data.append(item_row)
+		data.append(shift_info)
 	
 	# Add grand total row
 	if data:
@@ -297,94 +232,31 @@ def get_data(filters, cost_centers):
 			'pos_opening_shift': _("GRAND TOTAL"),
 			'pos_profile': '',
 			'pos_closing_shift': '',
-			'total_shifts': sum(row['total_shifts'] for row in data if row.get('_is_group') == 1),
-			'total_cash_sales': sum(row['total_cash_sales'] for row in data if row.get('_is_group') == 1),
-			'total_card_sales': sum(row['total_card_sales'] for row in data if row.get('_is_group') == 1),
-			'total_grand_total': sum(row['total_grand_total'] for row in data if row.get('_is_group') == 1),
-			'total_net_total': sum(row['total_net_total'] for row in data if row.get('_is_group') == 1),
-			'total_quantity': sum(row['total_quantity'] for row in data if row.get('_is_group') == 1),
-			'return_sales_count': sum(row['return_sales_count'] for row in data if row.get('_is_group') == 1),
-			'average_per_shift': 0,  # Will be calculated separately
+			'total_shifts': sum(row['total_shifts'] for row in data),
+			'total_cash_sales': sum(row['total_cash_sales'] for row in data),
+			'total_card_sales': sum(row['total_card_sales'] for row in data),
+			'total_grand_total': sum(row['total_grand_total'] for row in data),
+			'total_net_total': sum(row['total_net_total'] for row in data),
+			'total_quantity': sum(row['total_quantity'] for row in data),
+			'average_per_shift': 0,
 			'posting_date': '',
-			'cashier': '',
-			'_is_group': 1,
-			'_indent': 0
+			'cashier': ''
 		}
 		
 		# Add cost center totals
 		for cost_center in cost_centers:
 			field_name = f"cost_center_{cost_center.replace(' ', '_').replace('-', '_')}"
-			grand_totals[field_name] = sum(row.get(field_name, 0) for row in data if row.get('_is_group') == 1)
+			grand_totals[field_name] = sum(row.get(field_name, 0) for row in data)
 		
 		# Calculate overall average per shift
 		if grand_totals['total_shifts'] > 0:
 			grand_totals['average_per_shift'] = flt(grand_totals['total_grand_total']) / grand_totals['total_shifts']
 		data.append(grand_totals)
 	
+	
 	return data
 
 
-def get_sales_invoices_for_shift(pos_opening_shift):
-	"""Get sales invoices with items for a specific shift"""
-	# Check if POS Profile uses POS Invoice or Sales Invoice
-	pos_profile = frappe.db.get_value(
-		"POS Opening Shift", pos_opening_shift, "pos_profile"
-	)
-	
-	use_pos_invoice = frappe.db.get_value(
-		"POS Profile", pos_profile, "create_pos_invoice_instead_of_sales_invoice"
-	)
-	
-	doctype = "POS Invoice" if use_pos_invoice else "Sales Invoice"
-	
-	# Get invoices for this shift
-	invoices = frappe.get_all(
-		doctype,
-		filters={
-			"posa_pos_opening_shift": pos_opening_shift,
-			"docstatus": 1
-		},
-		fields=[
-			"name", "grand_total", "net_total", "total_qty", 
-			"posting_date", "customer", "posting_time"
-		],
-		order_by="posting_date, posting_time"
-	)
-	
-	invoice_details = []
-	for invoice in invoices:
-		# Get invoice items
-		items = frappe.get_all(
-			f"{doctype} Item",
-			filters={"parent": invoice.name},
-			fields=[
-				"item_code", "item_name", "qty", "rate", "amount",
-				"description", "uom"
-			],
-			order_by="idx"
-		)
-		
-		# Get payments for this invoice
-		payments = frappe.get_all(
-			f"{doctype} Payment",
-			filters={"parent": invoice.name},
-			fields=["mode_of_payment", "amount"],
-			order_by="idx"
-		)
-		
-		invoice_details.append({
-			"invoice_name": invoice.name,
-			"customer": invoice.customer,
-			"posting_date": invoice.posting_date,
-			"posting_time": invoice.posting_time,
-			"grand_total": flt(invoice.grand_total),
-			"net_total": flt(invoice.net_total),
-			"total_qty": flt(invoice.total_qty),
-			"items": items,
-			"payments": payments
-		})
-	
-	return invoice_details
 
 
 def get_payment_breakdown(pos_opening_shift):
